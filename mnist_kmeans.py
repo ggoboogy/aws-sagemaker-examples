@@ -1,24 +1,29 @@
-import pickle, gzip, numpy, urllib.request, json, sagemaker
-#import matplotlib.pyplot as plt
+import pickle, gzip, numpy, urllib.request, json, sagemaker, os
 from sagemaker import KMeans
 
 # constants
-BUCKET = "input-bucket-name"
+BUCKET = "" # TODO Input Bucket Name
 OUTPUT_PATH = "s3://{}/hands-on/mnist-kmeans/output".format(BUCKET)
-ROLE = "input-iam-role"
+ROLE = "" # TODO Input IAM Role
+ENDPOINT_NAME = "mnist-kmeans-ec2-jhy3"
 
 def show_image(arr):
   pixels = arr.reshape(28, 28)
   plt.imshow(pixels, cmap="gray")
   plt.show()
 
-if __name__ == "__main__":
-  # download and read MNIST dataset
-  urllib.request.urlretrieve("http://deeplearning.net/data/mnist/mnist.pkl.gz", "mnist.pkl.gz")
+def get_mnist_dataset():
+  urllib.request.urlretrieve("http://deeplearning.net/data/mnist/mnist.pkl.gz",
+      "mnist.pkl.gz")
   f = gzip.open('mnist.pkl.gz', 'rb')
   train_set, valid_set, test_set = pickle.load(f, encoding="latin1")
   f.close()
+  return train_set, valid_set, test_set
   
+if __name__ == "__main__":
+  # get MNIST dataset
+  train_set, valid_set, test_set = get_mnist_dataset()
+
   # create model using built-in k-means algorithm
   kmeans = KMeans(role=ROLE,
                   train_instance_count=1,
@@ -28,10 +33,11 @@ if __name__ == "__main__":
                   k=10)
   # train model
   kmeans.fit(kmeans.record_set(train_set[0]))
-  
+
   # deploy model to endpoint
-  kmeans_predictor = kmeans.deploy(initial_instance_count=1,
-                                   instance_type='ml.m4.xlarge')
+  kmeans_predictor = kmeans.deploy(initial_instance_count=2,
+                                   instance_type='ml.m4.xlarge',
+                                   endpoint_name=ENDPOINT_NAME)
   # test model
   input_set = test_set
 
@@ -51,4 +57,8 @@ if __name__ == "__main__":
     print("-"*80)
     print(*cnt, sep="\t", end="\n\n")
 
+  # delete endpoint & endpoint configuration
   sagemaker.Session().delete_endpoint(kmeans_predictor.endpoint)
+  cmd = ("aws sagemaker delete-endpoint-config --endpoint-config-name %s"
+      %ENDPOINT_NAME)
+  os.system(cmd)
